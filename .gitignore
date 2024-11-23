@@ -1,0 +1,12 @@
+speaker_pretrain/*
+*.csv
+*.wav
+*/__pycache__/*
+speaker/*
+hubert_pretrain/hubert-soft-0d54a1f4.pt
+crepe/assets/full.pth
+vits_decoder/alias/__pycache__/*
+whisper_pretrain/large-v2.pt
+vits_pretrain/sovits5.0.pretrain.pth
+spks/*
+*.npy
