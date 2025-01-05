@@ -56,10 +56,10 @@ if __name__ == "__main__":
     random.shuffle(spkPaths)
 
     for spks in spkPaths:
-        if os.path.isdir(f"./{wavPath}/{spks}"):
-            os.makedirs(f"./{ppgPath}/{spks}", exist_ok=True)
+        if os.path.isdir(f"{wavPath}/{spks}"):
+            os.makedirs(f"{ppgPath}/{spks}", exist_ok=True)
 
-            files = [f for f in os.listdir(f"./{wavPath}/{spks}") if f.endswith(".wav")]
+            files = [f for f in os.listdir(f"{wavPath}/{spks}") if f.endswith(".wav")]
             for file in tqdm(files, desc=f'Processing ppg {spks}'):
                 if file.endswith(".wav"):
                     # print(file)

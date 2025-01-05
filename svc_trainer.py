@@ -31,13 +31,9 @@ if __name__ == '__main__':
     torch.manual_seed(hp.train.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(hp.train.seed)
-        args.num_gpus = torch.cuda.device_count()
+        args.num_gpus = 1#torch.cuda.device_count()
         print('Batch size per GPU :', hp.train.batch_size)
 
-        if args.num_gpus > 1:
-            mp.spawn(train, nprocs=args.num_gpus,
-                     args=(args, args.checkpoint_path, hp, hp_str,))
-        else:
-            train(0, args, args.checkpoint_path, hp, hp_str)
+        train(0, args, args.checkpoint_path, hp, hp_str)
     else:
         print('No GPU find!')

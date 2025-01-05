@@ -1,7 +1,7 @@
 train:
   model: "sovits"
   seed: 1234
-  epochs: 10000
+  epochs: 1 #10000
   learning_rate: 5e-5
   betas: [0.8, 0.99]
   lr_decay: 0.999875
@@ -15,8 +15,8 @@ train:
   pretrain: "./vits_pretrain/sovits5.0.pretrain.pth"
 #############################
 data: 
-  training_files: "files/train.txt"
-  validation_files: "files/valid.txt"
+  training_files: "/mnt/hdd/yw/VBeautifier/data_svc/train.txt"
+  validation_files: "/mnt/hdd/yw/VBeautifier/data_svc/valid.txt"
   segment_size: 8000  # WARNING: base on hop_length
   max_wav_value: 32768.0
   sampling_rate: 32000
@@ -59,7 +59,7 @@ mrd:
 log:
   info_interval: 100
   eval_interval: 1
-  save_interval: 5
+  save_interval: 1
   num_audio: 6
   pth_dir: 'chkpt'
   log_dir: 'logs'

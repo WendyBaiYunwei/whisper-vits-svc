@@ -122,29 +122,43 @@ def train(rank, args, chkpt_path, hp, hp_str):
             logger.info("Resuming from checkpoint: %s" % chkpt_path)
         checkpoint = torch.load(chkpt_path, map_location='cpu')
         load_model(model_g, checkpoint['model_g'])
+        for param in model_g.enc_q.parameters():
+            param.requires_grad = False
+        for param in model_g.enc_p.parameters():
+            param.requires_grad = False
+        for param in model_g.emb_g.parameters():
+            param.requires_grad = False
+        # for param in model_g.speaker_classifier.parameters():
+        #     param.requires_grad = True
+        # for param in model_g.dec.parameters():
+        #     param.requires_grad = True
+        # for param in model_g.flow.parameters():
+        #     param.requires_grad = True
         load_model(model_d, checkpoint['model_d'])
         optim_g.load_state_dict(checkpoint['optim_g'])
         optim_d.load_state_dict(checkpoint['optim_d'])
-        init_epoch = checkpoint['epoch']
-        step = checkpoint['step']
+        init_epoch = 0#checkpoint['epoch']
+        step = 0#checkpoint['step']
 
-        if rank == 0:
-            if hp_str != checkpoint['hp_str']:
-                logger.warning("New hparams is different from checkpoint. Will use new.")
+        # if rank == 0:
+        #     if hp_str != checkpoint['hp_str']:
+        #         logger.warning("New hparams is different from checkpoint. Will use new.")
     else:
         if rank == 0:
             logger.info("Starting new training run.")
 
-    if args.num_gpus > 1:
-        model_g = DistributedDataParallel(model_g, device_ids=[rank])
-        model_d = DistributedDataParallel(model_d, device_ids=[rank])
+    # if args.num_gpus > 1:
+    #     model_g = DistributedDataParallel(model_g, device_ids=[rank])
+    #     model_d = DistributedDataParallel(model_d, device_ids=[rank])
 
     # this accelerates training when the size of minibatch is always consistent.
     # if not consistent, it'll horribly slow down.
     torch.backends.cudnn.benchmark = True
 
-    scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hp.train.lr_decay, last_epoch=init_epoch-2)
-    scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hp.train.lr_decay, last_epoch=init_epoch-2)
+    # scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hp.train.lr_decay, last_epoch=init_epoch-2)
+    # scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hp.train.lr_decay, last_epoch=init_epoch-2)
+    scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hp.train.lr_decay)
+    scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hp.train.lr_decay)
 
     stft_criterion = MultiResolutionSTFTLoss(device, eval(hp.mrd.resolutions))
     spkc_criterion = nn.CosineEmbeddingLoss()
@@ -155,9 +169,6 @@ def train(rank, args, chkpt_path, hp, hp_str):
 
         trainloader.batch_sampler.set_epoch(epoch)
 
-        if rank == 0 and epoch % hp.log.eval_interval == 0:
-            with torch.no_grad():
-                validate(hp, args, model_g, model_d, valloader, stft, writer, step, device)
 
         if rank == 0:
             loader = tqdm.tqdm(trainloader, desc='Loading train data')
@@ -172,7 +183,8 @@ def train(rank, args, chkpt_path, hp, hp_str):
             ppg = ppg.to(device)
             vec = vec.to(device)
             pit = pit.to(device)
-            spk = spk.to(device)
+            spk_mean = spk.mean()
+            spk = torch.ones(spk.shape).to(device) * spk_mean
             spec = spec.to(device)
             audio = audio.to(device)
             ppg_l = ppg_l.to(device)
@@ -224,7 +236,11 @@ def train(rank, args, chkpt_path, hp, hp_str):
 
             if ((step + 1) % hp.train.accum_step == 0) or (step + 1 == len(loader)):
                 # accumulate gradients for accum steps
-                for param in model_g.parameters():
+                for param in model_g.speaker_classifier.parameters():
+                    param.grad /= hp.train.accum_step
+                for param in model_g.dec.parameters():
+                    param.grad /= hp.train.accum_step
+                for param in model_g.flow.parameters():
                     param.grad /= hp.train.accum_step
                 clip_grad_value_(model_g.parameters(),  None)
                 # update model
@@ -263,8 +279,8 @@ def train(rank, args, chkpt_path, hp, hp_str):
                     epoch, loss_g, loss_m, loss_s, loss_d, loss_k, loss_r, loss_i, step))
 
         if rank == 0 and epoch % hp.log.save_interval == 0:
-            save_path = os.path.join(pth_dir, '%s_%04d.pt'
-                                     % (args.name, epoch))
+            save_path = os.path.join(pth_dir, '%s.pt'
+                                     % (args.name + str(epoch)))
             torch.save({
                 'model_g': (model_g.module if args.num_gpus > 1 else model_g).state_dict(),
                 'model_d': (model_d.module if args.num_gpus > 1 else model_d).state_dict(),

@@ -32,7 +32,7 @@ def process_file(file):
 
 
 def process_files_with_thread_pool(wavPath, spks, thread_num):
-    files = os.listdir(f"./{wavPath}/{spks}")
+    files = os.listdir(f"{wavPath}/{spks}")
     with ThreadPoolExecutor(max_workers=thread_num) as executor:
         list(tqdm(executor.map(process_file, files), total=len(files), desc=f'Processing spec {spks}'))
 
@@ -53,8 +53,8 @@ if __name__ == "__main__":
     hps = OmegaConf.load("./configs/base.yaml")
 
     for spks in os.listdir(wavPath):
-        if os.path.isdir(f"./{wavPath}/{spks}"):
-            os.makedirs(f"./{spePath}/{spks}", exist_ok=True)
+        if os.path.isdir(f"{wavPath}/{spks}"):
+            os.makedirs(f"{spePath}/{spks}", exist_ok=True)
             if args.thread_count == 0:
                 process_num = os.cpu_count() // 2 + 1
             else:

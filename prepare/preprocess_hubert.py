@@ -49,10 +49,10 @@ if __name__ == "__main__":
     hubert = load_model(os.path.join("hubert_pretrain", "hubert-soft-0d54a1f4.pt"), device)
 
     for spks in os.listdir(wavPath):
-        if os.path.isdir(f"./{wavPath}/{spks}"):
-            os.makedirs(f"./{vecPath}/{spks}", exist_ok=True)
+        if os.path.isdir(f"{wavPath}/{spks}"):
+            os.makedirs(f"{vecPath}/{spks}", exist_ok=True)
 
-            files = [f for f in os.listdir(f"./{wavPath}/{spks}") if f.endswith(".wav")]
+            files = [f for f in os.listdir(f"{wavPath}/{spks}") if f.endswith(".wav")]
             for file in tqdm(files, desc=f'Processing vec {spks}'):
                 file = file[:-4]
                 pred_vec(hubert, f"{wavPath}/{spks}/{file}.wav", f"{vecPath}/{spks}/{file}.vec", device)

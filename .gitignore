@@ -10,3 +10,5 @@ whisper_pretrain/large-v2.pt
 vits_pretrain/sovits5.0.pretrain.pth
 spks/*
 *.npy
+logs/*
+chkpt/*

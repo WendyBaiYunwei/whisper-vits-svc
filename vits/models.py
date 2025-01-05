@@ -10,7 +10,54 @@ from vits.utils import f0_to_coarse
 from vits_decoder.generator import Generator
 from vits.modules_grl import SpeakerClassifier
 
+import math
 
+def gaussian_kernel1d(size: int, sigma: float) -> torch.Tensor:
+    """Creates a 1D Gaussian kernel."""
+    x = torch.arange(-size, size + 1, dtype=torch.float32).cuda()
+    kernel = torch.exp(-0.5 * (x / sigma) ** 2)
+    return kernel / kernel.sum()  # Normalize the kernel
+
+def apply_gaussian_filter1d_batch(batch: torch.Tensor, kernel_size: int, sigma: float) -> torch.Tensor:
+    kernel = gaussian_kernel1d(kernel_size, sigma).view(1, 1, -1)  # Shape (1, 1, kernel_size)
+    
+    batch = batch.swapaxes(0, 1).unsqueeze(1)
+
+    smoothed = torch.nn.functional.conv1d(batch, kernel, padding=kernel_size, groups=1)
+
+    return smoothed.squeeze(1).swapaxes(0, 1)
+
+def pca(z):
+    time_size = z.shape[-1]
+    batch_size = z.shape[0]
+    channel_size = z.shape[1]
+    orig_z = z
+    # brief_z = z.mean(-1)
+    # print(z.isnan().any())
+    centre_z = z - torch.mean(z.mean(-1), dim=-1).reshape(batch_size, 1, 1)
+    z = centre_z / (torch.norm(centre_z, p=2, dim=-1) + 1e-6).unsqueeze(-1)
+    # print(z[0, :4, :4])
+    importance = torch.bmm(z, z.transpose(1, -1))
+    importance = (importance - torch.min(importance)) / (torch.max(importance) - torch.min(importance)+1e-6)
+    importance += torch.diag(torch.ones(channel_size)).unsqueeze(0).cuda()
+    # print(importance[0, :4, :4])
+    u, s, vh = torch.linalg.svd(importance)
+    s_cp = s.clone()
+    s_cp[:, -40:] = 0.0 # 192
+    diag = torch.stack([torch.diag(per_s) for per_s in s_cp])
+    norm = torch.linalg.inv(importance)
+
+    importance = torch.bmm(u, diag) # reduced importance
+    importance = torch.bmm(importance, vh)    
+    normed_importance = torch.bmm(importance, norm)
+    # print(normed_importance.shape)
+    # print((normed_importance - torch.diag(torch.ones(192).cuda()).unsqueeze(0)).sum())
+    # exit()
+    orig_z[0, :, :] = apply_gaussian_filter1d_batch(orig_z[0, :, :], 3, 1)
+    reduced_z = torch.bmm(normed_importance, orig_z)
+    # print((reduced_z - orig_z).sum())
+    return reduced_z
+        
 class TextEncoder(nn.Module):
     def __init__(self,
                  in_channels,
@@ -36,7 +83,7 @@ class TextEncoder(nn.Module):
             p_dropout)
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
 
-    def forward(self, x, x_lengths, v, f0):
+    def forward(self, x, x_lengths, v, z_q, f0):
         x = torch.transpose(x, 1, -1)  # [b, h, t]
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(
             x.dtype
@@ -48,9 +95,35 @@ class TextEncoder(nn.Module):
         x = self.enc(x * x_mask, x_mask)
         stats = self.proj(x) * x_mask
         m, logs = torch.split(stats, self.out_channels, dim=1)
-        z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask
+        # combine reduced z_q
+        min_len = min(z_q.shape[2], m.shape[2])
+        z_q = z_q[:, :, :min_len]
+        m = m[:, :, :min_len]
+        logs = logs[:, :, :min_len]
+        x_mask = x_mask[:, :, :min_len]
+        z_q1 = (z_q - z_q.mean())/z_q.std()*m.std() + m.mean()
+        m = 0.5 * (z_q1 + m)
+        z_q2 = (z_q - z_q.mean())/z_q.std()*logs.std() + logs.mean()
+        logs = 0.5 * (z_q2 + logs)
+        x = m + torch.randn_like(m) * torch.exp(logs)
+        z = x * x_mask
         return z, m, logs, x_mask, x
 
+    def baseline(self, x, x_lengths, v, f0):
+        x = torch.transpose(x, 1, -1)  # [b, h, t]
+        x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(
+            x.dtype
+        )
+        x = self.pre(x) * x_mask
+        v = torch.transpose(v, 1, -1)  # [b, h, t]
+        v = self.hub(v) * x_mask
+        x = x + v + self.pit(f0).transpose(1, 2)
+        x = self.enc(x * x_mask, x_mask)
+        stats = self.proj(x) * x_mask
+        m, logs = torch.split(stats, self.out_channels, dim=1)
+        x = m + torch.randn_like(m) * torch.exp(logs)
+        z = x * x_mask
+        return z, m, logs, x_mask, x
 
 class ResidualCouplingBlock(nn.Module):
     def __init__(
@@ -184,10 +257,11 @@ class SynthesizerTrn(nn.Module):
         ppg = ppg + torch.randn_like(ppg) * 1  # Perturbation
         vec = vec + torch.randn_like(vec) * 2  # Perturbation
         g = self.emb_g(F.normalize(spk)).unsqueeze(-1)
-        z_p, m_p, logs_p, ppg_mask, x = self.enc_p(
-            ppg, ppg_l, vec, f0=f0_to_coarse(pit))
+        
         z_q, m_q, logs_q, spec_mask = self.enc_q(spec, spec_l, g=g)
-
+        reduced_z_q = pca(z_q)
+        z_p, m_p, logs_p, ppg_mask, x = self.enc_p(
+            ppg, ppg_l, vec, reduced_z_q, f0=f0_to_coarse(pit))
         z_slice, pit_slice, ids_slice = commons.rand_slice_segments_with_pitch(
             z_q, pit, spec_l, self.segment_size)
         audio = self.dec(spk, z_slice, pit_slice)
@@ -217,6 +291,7 @@ class SynthesizerInfer(nn.Module):
     ):
         super().__init__()
         self.segment_size = segment_size
+        self.emb_g = nn.Linear(hp.vits.spk_dim, hp.vits.gin_channels)
         self.enc_p = TextEncoder(
             hp.vits.ppg_dim,
             hp.vits.vec_dim,
@@ -227,6 +302,15 @@ class SynthesizerInfer(nn.Module):
             6,
             3,
             0.1,
+        )
+        self.enc_q = PosteriorEncoder(
+            spec_channels,
+            hp.vits.inter_channels,
+            hp.vits.hidden_channels,
+            5,
+            1,
+            16,
+            gin_channels=hp.vits.gin_channels,
         )
         self.flow = ResidualCouplingBlock(
             hp.vits.inter_channels,
@@ -248,8 +332,19 @@ class SynthesizerInfer(nn.Module):
     def source2wav(self, source):
         return self.dec.source2wav(source)
 
-    def inference(self, ppg, vec, pit, spk, ppg_l, source):
+    def inference(self, ppg, vec, pit, spk, ppg_l, source, spec):
+        g = self.emb_g(F.normalize(spk)).unsqueeze(-1)
+        z_q, _, _, _ = self.enc_q(spec, \
+            torch.tensor(spec.shape[-1]).reshape(1).long().cuda(), g=g) ## get spec, spec_l, g
+        reduced_z_q = pca(z_q)
         z_p, m_p, logs_p, ppg_mask, x = self.enc_p(
+            ppg, ppg_l, vec, reduced_z_q, f0=f0_to_coarse(pit))
+        z, _ = self.flow(z_p, ppg_mask, g=spk, reverse=True)
+        o = self.dec.inference(spk, z * ppg_mask, source)
+        return o
+    
+    def baseline(self, ppg, vec, pit, spk, ppg_l, source, spec=None):
+        z_p, m_p, logs_p, ppg_mask, x = self.enc_p.baseline(
             ppg, ppg_l, vec, f0=f0_to_coarse(pit))
         z, _ = self.flow(z_p, ppg_mask, g=spk, reverse=True)
         o = self.dec.inference(spk, z * ppg_mask, source)

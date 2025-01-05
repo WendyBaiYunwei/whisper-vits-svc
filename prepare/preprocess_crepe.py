@@ -57,13 +57,13 @@ if __name__ == "__main__":
     wavPath = args.wav
     pitPath = args.pit
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda:1" if torch.cuda.is_available() else "cpu"
 
     for spks in os.listdir(wavPath):
-        if os.path.isdir(f"./{wavPath}/{spks}"):
-            os.makedirs(f"./{pitPath}/{spks}", exist_ok=True)
+        if os.path.isdir(f"{wavPath}/{spks}"):
+            os.makedirs(f"{pitPath}/{spks}", exist_ok=True)
 
-            files = [f for f in os.listdir(f"./{wavPath}/{spks}") if f.endswith(".wav")]
+            files = [f for f in os.listdir(f"{wavPath}/{spks}") if f.endswith(".wav")]
             for file in tqdm(files, desc=f'Processing crepe {spks}'):
                 file = file[:-4]
                 compute_f0(f"{wavPath}/{spks}/{file}.wav", f"{pitPath}/{spks}/{file}.pit", device)
