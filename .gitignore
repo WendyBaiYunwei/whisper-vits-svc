@@ -12,3 +12,4 @@ spks/*
 *.npy
 logs/*
 chkpt/*
+*.txt
