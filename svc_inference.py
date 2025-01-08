@@ -136,8 +136,14 @@ def svc_infer(model, retrieval, spk, pit, ppg, vec, hp, device, spec):
             if args.mode == 'baseline':
                 sub_out = model.baseline(
                     sub_ppg, sub_vec, sub_pit, spk, sub_len, sub_har, sub_spec)
-            else:
+            elif args.mode == 'beaut_gauss':
                 sub_out = model.inference(
+                    sub_ppg, sub_vec, sub_pit, spk, sub_len, sub_har, sub_spec, args.extent, gaussian=True)
+            elif args.mode == 'beaut':
+                sub_out = model.inference(
+                    sub_ppg, sub_vec, sub_pit, spk, sub_len, sub_har, sub_spec, args.extent)
+            elif args.mode == 'no_pca':
+                sub_out = model.no_pca_inference(
                     sub_ppg, sub_vec, sub_pit, spk, sub_len, sub_har, sub_spec)
             sub_out = sub_out[0, 0].data.cpu().detach().numpy()
 
@@ -195,7 +201,7 @@ def main(args):
     else:
         logging.basicConfig(level=logging.INFO)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     model = SynthesizerInfer(
         hp.data.filter_length // 2 + 1,
         hp.data.segment_size // hp.data.hop_length,
@@ -203,8 +209,10 @@ def main(args):
     
     if args.model == None and args.mode == 'baseline':
         args.model = '/home/yunwei/new/voice_synthesis/whisper-vits-svc/vits_pretrain/sovits5.0.pretrain.pth'
-    elif args.model == None:
-        args.model = '/home/yunwei/new/voice_synthesis/whisper-vits-svc/chkpt/add_pca/add_pca1.pt'
+    elif args.model == None and 'beaut' in args.mode:
+        args.model = '/home/yunwei/new/voice_synthesis/whisper-vits-svc/chkpt/gauss_pca/gauss_pca1.pt'
+    else:
+        args.model = '/home/yunwei/new/voice_synthesis/whisper-vits-svc/chkpt/no_pca_train/no_pca_train1.pt'
     load_svc_model(args.model, model)
     # retrieval = create_retrival(args)
     model.eval()
@@ -266,7 +274,8 @@ if __name__ == '__main__':
                         help="Path of pitch csv file.")
     parser.add_argument('--shift', type=int, default=0,
                         help="Pitch shift key.")
-    parser.add_argument('--mode', type=str, required=True, choices=['baseline', 'beaut'])
+    parser.add_argument('--mode', type=str, required=True, choices=['baseline', 'beaut_gauss', 'beaut', 'no_pca'])
+    parser.add_argument('--extent', type=int, default=50)
     parser.add_argument('--note', type=str, default='')
 
     # parser.add_argument('--enable-retrieval', action="store_true",

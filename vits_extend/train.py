@@ -66,7 +66,7 @@ def train(rank, args, chkpt_path, hp, hp_str):
                            world_size=hp.dist_config.world_size * args.num_gpus, rank=rank)
 
     torch.cuda.manual_seed(hp.train.seed)
-    device = torch.device('cuda:{:d}'.format(rank))
+    device = torch.device('cuda:1')
 
     model_g = SynthesizerTrn(
         hp.data.filter_length // 2 + 1,
@@ -108,7 +108,7 @@ def train(rank, args, chkpt_path, hp, hp_str):
         )
         logger = logging.getLogger()
         writer = MyWriter(hp, log_dir)
-        valloader = create_dataloader_eval(hp)
+        # valloader = create_dataloader_eval(hp)
 
     if os.path.isfile(hp.train.pretrain):
         if rank == 0:
@@ -135,8 +135,8 @@ def train(rank, args, chkpt_path, hp, hp_str):
         # for param in model_g.flow.parameters():
         #     param.requires_grad = True
         load_model(model_d, checkpoint['model_d'])
-        optim_g.load_state_dict(checkpoint['optim_g'])
-        optim_d.load_state_dict(checkpoint['optim_d'])
+        # optim_g.load_state_dict(checkpoint['optim_g'])
+        # optim_d.load_state_dict(checkpoint['optim_d'])
         init_epoch = 0#checkpoint['epoch']
         step = 0#checkpoint['step']
 
@@ -161,14 +161,14 @@ def train(rank, args, chkpt_path, hp, hp_str):
     scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hp.train.lr_decay)
 
     stft_criterion = MultiResolutionSTFTLoss(device, eval(hp.mrd.resolutions))
-    spkc_criterion = nn.CosineEmbeddingLoss()
+    spkc_criterion = nn.CrossEntropyLoss()
 
     trainloader = create_dataloader_train(hp, args.num_gpus, rank)
 
+    before = time.time()
     for epoch in range(init_epoch, hp.train.epochs):
 
         trainloader.batch_sampler.set_epoch(epoch)
-
 
         if rank == 0:
             loader = tqdm.tqdm(trainloader, desc='Loading train data')
@@ -177,14 +177,16 @@ def train(rank, args, chkpt_path, hp, hp_str):
 
         model_g.train()
         model_d.train()
-
-        for ppg, ppg_l, vec, pit, spk, spec, spec_l, audio, audio_l in loader:
-
+        i = 0
+        losses = []
+        for ppg, ppg_l, vec, pit, spk, spk_l, spec, spec_l, audio, audio_l in loader:
             ppg = ppg.to(device)
             vec = vec.to(device)
             pit = pit.to(device)
+            spk = spk.to(device)
             spk_mean = spk.mean()
             spk = torch.ones(spk.shape).to(device) * spk_mean
+            spk_l = spk_l.to(device)
             spec = spec.to(device)
             audio = audio.to(device)
             ppg_l = ppg_l.to(device)
@@ -199,8 +201,25 @@ def train(rank, args, chkpt_path, hp, hp_str):
             audio = commons.slice_segments(
                 audio, ids_slice * hp.data.hop_length, hp.data.segment_size)  # slice
             # Spk Loss
-            spk_loss = spkc_criterion(spk, spk_preds, torch.Tensor(spk_preds.size(0))
-                                .to(device).fill_(1.0))
+            # spk_loss = spkc_criterion(spk, spk_preds, torch.Tensor(spk_preds.size(0))
+            #                     .to(device).fill_(1.0))
+            spk_loss = spkc_criterion(spk_preds, spk_l)
+            # # Step 1: Get predictions
+            # predictions = torch.argmax(spk_preds, dim=1)
+
+            # # Step 2: Compare predictions to labels
+            # correct = (predictions == spk)
+
+            # # Step 3: Compute accuracy
+            # accuracy = correct.sum().item() / spk.size(0)
+            # print(accuracy)
+            # losses.append(accuracy.item())
+            # i += 1
+            # if i == 100:
+            #     print(sum(losses)/len(losses))
+            #     import numpy as np
+            #     print(np.array(losses).std())
+            #     exit()
             # Mel Loss
             mel_fake = stft.mel_spectrogram(fake_audio.squeeze(1))
             mel_real = stft.mel_spectrogram(audio.squeeze(1))
@@ -326,3 +345,6 @@ def train(rank, args, chkpt_path, hp, hp_str):
 
         scheduler_g.step()
         scheduler_d.step()
+
+    after = time.time()
+    print(f'training finished with time spent: {after - before}')

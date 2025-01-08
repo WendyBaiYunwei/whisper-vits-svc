@@ -14,7 +14,7 @@ import math
 
 def gaussian_kernel1d(size: int, sigma: float) -> torch.Tensor:
     """Creates a 1D Gaussian kernel."""
-    x = torch.arange(-size, size + 1, dtype=torch.float32).cuda()
+    x = torch.arange(-size, size + 1, dtype=torch.float32).cuda(1)
     kernel = torch.exp(-0.5 * (x / sigma) ** 2)
     return kernel / kernel.sum()  # Normalize the kernel
 
@@ -27,7 +27,7 @@ def apply_gaussian_filter1d_batch(batch: torch.Tensor, kernel_size: int, sigma: 
 
     return smoothed.squeeze(1).swapaxes(0, 1)
 
-def pca(z):
+def pca(z, extent, gaussian=False):
     time_size = z.shape[-1]
     batch_size = z.shape[0]
     channel_size = z.shape[1]
@@ -39,11 +39,12 @@ def pca(z):
     # print(z[0, :4, :4])
     importance = torch.bmm(z, z.transpose(1, -1))
     importance = (importance - torch.min(importance)) / (torch.max(importance) - torch.min(importance)+1e-6)
-    importance += torch.diag(torch.ones(channel_size)).unsqueeze(0).cuda()
+    importance += torch.diag(torch.ones(channel_size)).unsqueeze(0).cuda(1)
     # print(importance[0, :4, :4])
     u, s, vh = torch.linalg.svd(importance)
     s_cp = s.clone()
-    s_cp[:, -40:] = 0.0 # 192
+    threshold = int(extent/100 * 120)
+    s_cp[:, -threshold:] = 0.0 # 192
     diag = torch.stack([torch.diag(per_s) for per_s in s_cp])
     norm = torch.linalg.inv(importance)
 
@@ -53,7 +54,9 @@ def pca(z):
     # print(normed_importance.shape)
     # print((normed_importance - torch.diag(torch.ones(192).cuda()).unsqueeze(0)).sum())
     # exit()
-    orig_z[0, :, :] = apply_gaussian_filter1d_batch(orig_z[0, :, :], 3, 1)
+    if gaussian == True:
+        sigma = extent/100 * 2
+        orig_z[0, :, :] = apply_gaussian_filter1d_batch(orig_z[0, :, :], 3, sigma=sigma)
     reduced_z = torch.bmm(normed_importance, orig_z)
     # print((reduced_z - orig_z).sum())
     return reduced_z
@@ -259,7 +262,7 @@ class SynthesizerTrn(nn.Module):
         g = self.emb_g(F.normalize(spk)).unsqueeze(-1)
         
         z_q, m_q, logs_q, spec_mask = self.enc_q(spec, spec_l, g=g)
-        reduced_z_q = pca(z_q)
+        reduced_z_q = pca(z_q, extent = 100)
         z_p, m_p, logs_p, ppg_mask, x = self.enc_p(
             ppg, ppg_l, vec, reduced_z_q, f0=f0_to_coarse(pit))
         z_slice, pit_slice, ids_slice = commons.rand_slice_segments_with_pitch(
@@ -332,13 +335,24 @@ class SynthesizerInfer(nn.Module):
     def source2wav(self, source):
         return self.dec.source2wav(source)
 
-    def inference(self, ppg, vec, pit, spk, ppg_l, source, spec):
+    def inference(self, ppg, vec, pit, spk, ppg_l, source, spec, extent, gaussian=False):
         g = self.emb_g(F.normalize(spk)).unsqueeze(-1)
         z_q, _, _, _ = self.enc_q(spec, \
-            torch.tensor(spec.shape[-1]).reshape(1).long().cuda(), g=g) ## get spec, spec_l, g
-        reduced_z_q = pca(z_q)
+            torch.tensor(spec.shape[-1]).reshape(1).long().cuda(1), g=g) ## get spec, spec_l, g
+        reduced_z_q = pca(z_q, extent, gaussian=gaussian)
         z_p, m_p, logs_p, ppg_mask, x = self.enc_p(
             ppg, ppg_l, vec, reduced_z_q, f0=f0_to_coarse(pit))
+        z, _ = self.flow(z_p, ppg_mask, g=spk, reverse=True)
+        o = self.dec.inference(spk, z * ppg_mask, source)
+        return o
+    
+    def no_pca_inference(self, ppg, vec, pit, spk, ppg_l, source, spec):
+        g = self.emb_g(F.normalize(spk)).unsqueeze(-1)
+        z_q, _, _, _ = self.enc_q(spec, \
+            torch.tensor(spec.shape[-1]).reshape(1).long().cuda(1), g=g) ## get spec, spec_l, g
+        # reduced_z_q = pca(z_q)
+        z_p, m_p, logs_p, ppg_mask, x = self.enc_p(
+            ppg, ppg_l, vec, z_q, f0=f0_to_coarse(pit))
         z, _ = self.flow(z_p, ppg_mask, g=spk, reverse=True)
         o = self.dec.inference(spk, z * ppg_mask, source)
         return o
