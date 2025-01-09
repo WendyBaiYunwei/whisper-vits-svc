@@ -6,6 +6,7 @@ from torch.nn import functional as F
 from vits import attentions
 from vits import commons
 from vits import modules
+from vits import spectrogram
 from vits.utils import f0_to_coarse
 from vits_decoder.generator import Generator
 from vits.modules_grl import SpeakerClassifier
@@ -54,9 +55,9 @@ def pca(z, extent, gaussian=False):
     # print(normed_importance.shape)
     # print((normed_importance - torch.diag(torch.ones(192).cuda()).unsqueeze(0)).sum())
     # exit()
-    if gaussian == True:
-        sigma = extent/100 * 2
-        orig_z[0, :, :] = apply_gaussian_filter1d_batch(orig_z[0, :, :], 3, sigma=sigma)
+    # if gaussian == True:
+    #     sigma = extent/100 * 5#0.75
+    #     orig_z[0, :, :] = apply_gaussian_filter1d_batch(orig_z[0, :, :], 50, sigma=sigma)
     reduced_z = torch.bmm(normed_importance, orig_z)
     # print((reduced_z - orig_z).sum())
     return reduced_z
@@ -197,12 +198,14 @@ class PosteriorEncoder(nn.Module):
         )
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
 
-    def forward(self, x, x_lengths, g=None):
+    def forward(self, x, x_lengths, g=None, get_x=False):
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(
             x.dtype
         )
         x = self.pre(x) * x_mask
         x = self.enc(x, x_mask, g=g)
+        if get_x == True:
+            return x
         stats = self.proj(x) * x_mask
         m, logs = torch.split(stats, self.out_channels, dim=1)
         z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask
@@ -233,9 +236,15 @@ class SynthesizerTrn(nn.Module):
             3,
             0.1,
         )
-        self.speaker_classifier = SpeakerClassifier(
+        self.speaker_classifier = nn.Linear(192, 80)
+        self.spk_enc = PosteriorEncoder(
+            spec_channels,
+            hp.vits.inter_channels,
             hp.vits.hidden_channels,
-            hp.vits.spk_dim,
+            5,
+            1,
+            16,
+            gin_channels=hp.vits.gin_channels,
         )
         self.enc_q = PosteriorEncoder(
             spec_channels,
@@ -255,25 +264,30 @@ class SynthesizerTrn(nn.Module):
             gin_channels=hp.vits.spk_dim
         )
         self.dec = Generator(hp=hp)
+        self.hp = hp.data
 
-    def forward(self, ppg, vec, pit, spec, spk, ppg_l, spec_l):
+    def forward(self, ppg, vec, pit, spec, spk, ppg_l, spec_l, stft):
         ppg = ppg + torch.randn_like(ppg) * 1  # Perturbation
         vec = vec + torch.randn_like(vec) * 2  # Perturbation
         g = self.emb_g(F.normalize(spk)).unsqueeze(-1)
         
         z_q, m_q, logs_q, spec_mask = self.enc_q(spec, spec_l, g=g)
-        reduced_z_q = pca(z_q, extent = 100)
+        # z_q = pca(z_q, extent=100) ##
         z_p, m_p, logs_p, ppg_mask, x = self.enc_p(
-            ppg, ppg_l, vec, reduced_z_q, f0=f0_to_coarse(pit))
+            ppg, ppg_l, vec, z_q, f0=f0_to_coarse(pit))
         z_slice, pit_slice, ids_slice = commons.rand_slice_segments_with_pitch(
-            z_q, pit, spec_l, self.segment_size)
+            z_p, pit, spec_l, self.segment_size)
         audio = self.dec(spk, z_slice, pit_slice)
 
         # SNAC to flow
-        z_f, logdet_f = self.flow(z_q, spec_mask, g=spk)
-        z_r, logdet_r = self.flow(z_p, spec_mask, g=spk, reverse=True)
+        z_f, logdet_f = 0, 0#self.flow(z_q, spec_mask, g=spk)
+        z_r, logdet_r = 0, 0#self.flow(z_p, spec_mask, g=spk, reverse=True)
         # speaker
-        spk_preds = self.speaker_classifier(x)
+        # audio to spec to embeddings (via posterior encoder .enc)
+        new_spec = stft.linear_spectrogram(audio.squeeze(1))
+        new_spec = new_spec.cuda(1)
+        spk_emb = self.spk_enc(new_spec, torch.tensor(new_spec.shape[-1], dtype=torch.long).unsqueeze(0).cuda(1), g=g, get_x=True)
+        spk_preds = self.speaker_classifier(spk_emb.mean(-1))
         return audio, ids_slice, spec_mask, (z_f, z_r, z_p, m_p, logs_p, z_q, m_q, logs_q, logdet_f, logdet_r), spk_preds
 
     def infer(self, ppg, vec, pit, spk, ppg_l):
@@ -339,10 +353,11 @@ class SynthesizerInfer(nn.Module):
         g = self.emb_g(F.normalize(spk)).unsqueeze(-1)
         z_q, _, _, _ = self.enc_q(spec, \
             torch.tensor(spec.shape[-1]).reshape(1).long().cuda(1), g=g) ## get spec, spec_l, g
-        reduced_z_q = pca(z_q, extent, gaussian=gaussian)
-        z_p, m_p, logs_p, ppg_mask, x = self.enc_p(
-            ppg, ppg_l, vec, reduced_z_q, f0=f0_to_coarse(pit))
-        z, _ = self.flow(z_p, ppg_mask, g=spk, reverse=True)
+        # z_q = pca(z_q, extent, gaussian=gaussian)
+        z, m_p, logs_p, ppg_mask, x = self.enc_p(
+            ppg, ppg_l, vec, z_q, f0=f0_to_coarse(pit))
+        z, _ = self.flow(z, ppg_mask, g=spk, reverse=True)
+        # z = pca(z, extent, gaussian=gaussian)
         o = self.dec.inference(spk, z * ppg_mask, source)
         return o
     
@@ -351,9 +366,9 @@ class SynthesizerInfer(nn.Module):
         z_q, _, _, _ = self.enc_q(spec, \
             torch.tensor(spec.shape[-1]).reshape(1).long().cuda(1), g=g) ## get spec, spec_l, g
         # reduced_z_q = pca(z_q)
-        z_p, m_p, logs_p, ppg_mask, x = self.enc_p(
+        z, m_p, logs_p, ppg_mask, x = self.enc_p(
             ppg, ppg_l, vec, z_q, f0=f0_to_coarse(pit))
-        z, _ = self.flow(z_p, ppg_mask, g=spk, reverse=True)
+        # z, _ = self.flow(z_p, ppg_mask, g=spk, reverse=True)
         o = self.dec.inference(spk, z * ppg_mask, source)
         return o
     

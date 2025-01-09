@@ -182,19 +182,19 @@ def main(args):
         args.ppg = "svc_tmp.ppg.npy"
         print(
             f"Auto run : python whisper/inference.py -w {args.wave} -p {args.ppg}")
-        os.system(f"python whisper/inference.py -w {args.wave} -p {args.ppg}")
+        # os.system(f"python whisper/inference.py -w {args.wave} -p {args.ppg}")
 
     if (args.vec == None):
         args.vec = "svc_tmp.vec.npy"
         print(
             f"Auto run : python hubert/inference.py -w {args.wave} -v {args.vec}")
-        os.system(f"python hubert/inference.py -w {args.wave} -v {args.vec}")
+        # os.system(f"python hubert/inference.py -w {args.wave} -v {args.vec}")
 
     if (args.pit == None):
         args.pit = "svc_tmp.pit.csv"
         print(
             f"Auto run : python pitch/inference.py -w {args.wave} -p {args.pit}")
-        os.system(f"python pitch/inference.py -w {args.wave} -p {args.pit}")
+        # os.system(f"python pitch/inference.py -w {args.wave} -p {args.pit}")
 
     if args.debug:
         logging.basicConfig(level=logging.DEBUG)
@@ -210,9 +210,9 @@ def main(args):
     if args.model == None and args.mode == 'baseline':
         args.model = '/home/yunwei/new/voice_synthesis/whisper-vits-svc/vits_pretrain/sovits5.0.pretrain.pth'
     elif args.model == None and 'beaut' in args.mode:
-        args.model = '/home/yunwei/new/voice_synthesis/whisper-vits-svc/chkpt/gauss_pca/gauss_pca1.pt'
+        args.model = '/home/yunwei/new/voice_synthesis/whisper-vits-svc/chkpt/no_pca/gauss_pca1.pt'
     else:
-        args.model = '/home/yunwei/new/voice_synthesis/whisper-vits-svc/chkpt/no_pca_train/no_pca_train1.pt'
+        args.model = '/home/yunwei/new/voice_synthesis/whisper-vits-svc/chkpt/no_pca_new/no_pca_new0.pt'
     load_svc_model(args.model, model)
     # retrieval = create_retrival(args)
     model.eval()
@@ -252,7 +252,10 @@ def main(args):
     out_audio = svc_infer(model, None, spk, pit, ppg, vec, hp, device, spec)
     # wave_name = args.wave.replace('.wav', '_syn.wav')
     name = args.wave.split('/')[-1][:-len('.wav')]
-    wave_name = f'{name}_{args.mode}_{args.note}.wav'
+    if 'beaut' in args.mode:
+        wave_name = f'{name}_{args.mode}_{args.extent}_{args.note}.wav'
+    else:
+        wave_name = f'{name}_{args.mode}_{args.note}.wav'
     write(wave_name, hp.data.sampling_rate, out_audio)
 
 
@@ -275,7 +278,7 @@ if __name__ == '__main__':
     parser.add_argument('--shift', type=int, default=0,
                         help="Pitch shift key.")
     parser.add_argument('--mode', type=str, required=True, choices=['baseline', 'beaut_gauss', 'beaut', 'no_pca'])
-    parser.add_argument('--extent', type=int, default=50)
+    parser.add_argument('--extent', type=int, default=100)
     parser.add_argument('--note', type=str, default='')
 
     # parser.add_argument('--enable-retrieval', action="store_true",

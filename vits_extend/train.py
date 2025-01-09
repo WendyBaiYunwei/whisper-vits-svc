@@ -196,7 +196,7 @@ def train(rank, args, chkpt_path, hp, hp_str):
             # generator
             fake_audio, ids_slice, z_mask, \
                 (z_f, z_r, z_p, m_p, logs_p, z_q, m_q, logs_q, logdet_f, logdet_r), spk_preds = model_g(
-                    ppg, vec, pit, spec, spk, ppg_l, spec_l)
+                    ppg, vec, pit, spec, spk, ppg_l, spec_l, stft)
 
             audio = commons.slice_segments(
                 audio, ids_slice * hp.data.hop_length, hp.data.segment_size)  # slice
@@ -246,11 +246,11 @@ def train(rank, args, chkpt_path, hp, hp_str):
             feat_loss = feat_loss * 2
 
             # Kl Loss
-            loss_kl_f = kl_loss(z_f, logs_q, m_p, logs_p, logdet_f, z_mask) * hp.train.c_kl
-            loss_kl_r = kl_loss(z_r, logs_p, m_q, logs_q, logdet_r, z_mask) * hp.train.c_kl
+            # loss_kl_f = kl_loss(z_f, logs_q, m_p, logs_p, logdet_f, z_mask) * hp.train.c_kl
+            # loss_kl_r = kl_loss(z_r, logs_p, m_q, logs_q, logdet_r, z_mask) * hp.train.c_kl
 
             # Loss
-            loss_g = score_loss + feat_loss + mel_loss + stft_loss + loss_kl_f + loss_kl_r * 0.5 + spk_loss * 2
+            loss_g = score_loss + feat_loss + mel_loss + stft_loss + spk_loss * 0.5
             loss_g.backward()
 
             if ((step + 1) % hp.train.accum_step == 0) or (step + 1 == len(loader)):
@@ -259,8 +259,8 @@ def train(rank, args, chkpt_path, hp, hp_str):
                     param.grad /= hp.train.accum_step
                 for param in model_g.dec.parameters():
                     param.grad /= hp.train.accum_step
-                for param in model_g.flow.parameters():
-                    param.grad /= hp.train.accum_step
+                # for param in model_g.flow.parameters():
+                #     param.grad /= hp.train.accum_step
                 clip_grad_value_(model_g.parameters(),  None)
                 # update model
                 optim_g.step()
@@ -287,8 +287,8 @@ def train(rank, args, chkpt_path, hp, hp_str):
             loss_d = loss_d.item()
             loss_s = stft_loss.item()
             loss_m = mel_loss.item()
-            loss_k = loss_kl_f.item()
-            loss_r = loss_kl_r.item()
+            loss_k = 0#loss_kl_f.item()
+            loss_r = 0#loss_kl_r.item()
             loss_i = spk_loss.item()
 
             if rank == 0 and step % hp.log.info_interval == 0:

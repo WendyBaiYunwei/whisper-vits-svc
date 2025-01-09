@@ -47,6 +47,7 @@ commands = []
 # filenames = ['test.wav']
 # filenames = ['test_audio/train/42_情深深雨濛濛_5.wav']
 filenames = [
+    # 'test_audio/imagine_bad.wav',
     # '/mnt/hdd/yw/VBeautifier/OpenSinger/Woman/waves-32k/26_修炼爱情/26_修炼爱情_14.wav',\
     # '/mnt/hdd/yw/VBeautifier/OpenSinger/Woman/waves-32k/6_修炼爱情/6_修炼爱情_10.wav',\
     # 'test_audio/train/42_情深深雨濛濛_5.wav',\
@@ -88,12 +89,12 @@ filenames = [
     # 'test_audio/imagine_bad.wav',
     # 'test_audio/如果爱忘了_bad.wav',
     # 'test_audio/heal_the_world_bad.wav',
-    # 'test_audio/first_love_bad.wav',
+    'test_audio/first_love_bad.wav',
     # '/home/yunwei/new/VBeautifier/test_audio/userstudy/new_tests/handInHand.m4a',
     # '/home/yunwei/new/VBeautifier/test_audio/userstudy/new_tests/imagine.m4a',
     # '/home/yunwei/new/VBeautifier/test_audio/userstudy/new_tests/lvGuang.m4a',
     # '/home/yunwei/new/VBeautifier/test_audio/userstudy/userstudy_round2/archive/最初的梦想.m4a',
-    # '/home/yunwei/new/VBeautifier/test_audio/userstudy/userstudy_round2/diff/给我一个理由忘记.m4a',
+    # '/home/yunwei/new/VBeautifier/test_audio/userstudy/userstudy_round2/raw/给我一个理由忘记.wav',
     # '/home/yunwei/new/VBeautifier/test_audio/userstudy/userstudy_round2/raw/high/给未来的自己.m4a'
     # '/home/yunwei/new/VBeautifier/test_audio/userstudy/userstudy_round2/raw/high/hongdou.m4a'
     # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/nsvb_before1.wav',
@@ -102,8 +103,8 @@ filenames = [
     # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/nsvb_before4.wav',
     # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/nsvb_before5.wav',
     # '/home/yunwei/new/VBeautifierDemo/audio/you_raise_me_up_ugly.wav',
-    '/home/yunwei/new/voice_synthesis/whisper-vits-svc/test_audio/spk/female_train/mingtian.wav',
-    '/home/yunwei/new/VBeautifierDemo/audio/shiyi.wav'
+    # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/test_audio/spk/female_train/mingtian.wav',
+    # '/home/yunwei/new/VBeautifierDemo/audio/shiyi.wav'
 ]
 spks = [
     # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/spks/21gunsUnnatural.spk.npy',
@@ -116,7 +117,7 @@ spks = [
     # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/spks/最初的梦想_clipped.spk.npy',
     # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/spks/yt/letItGoMale.spk.npy',
     # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/spks/xm/you_raise_me_up_ugly.spk.npy',
-    # '/mnt/hdd/yw/VBeautifier/overall_data/data_svc2/singer/cpop_singer.spk.npy'
+    '/mnt/hdd/yw/VBeautifier/overall_data/data_svc2/singer/cpop_singer.spk.npy'
     # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/test_audio/spk1/nsvb_before1.spk.npy',
     # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/test_audio/spk2/nsvb_before2.spk.npy',
     # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/test_audio/spk3/nsvb_before3.spk.npy',
@@ -124,8 +125,8 @@ spks = [
     # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/test_audio/spk5/nsvb_before5.spk.npy'
     # '/home/yunwei/new/VBeautifier/test_audio/userstudy/singer/xiangming.spk.npy',
     # '/home/yunwei/new/VBeautifier/test_audio/userstudy/singer/yangtao.spk.npy',
-    '/home/yunwei/new/voice_synthesis/whisper-vits-svc/test_audio/spk/female_train/mingtian.spk.npy',
-    '/home/yunwei/new/voice_synthesis/whisper-vits-svc/test_audio/spk/male_train/shiyi_beaut_gaussian.spk.npy'
+    # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/test_audio/spk/female_train/mingtian.spk.npy',
+    # '/home/yunwei/new/voice_synthesis/whisper-vits-svc/test_audio/spk/male_train/shiyi_beaut_gaussian.spk.npy'
 ]
 for i, filename in enumerate(filenames):
     # if i == 0:
@@ -133,10 +134,23 @@ for i, filename in enumerate(filenames):
     # stylename, filename = filename, stylename
     # stylename = filename
     # command1 = f'python voicep_inference.py --config configs/beauty.yaml --wave {filename} --style_wave {filename}'
-    spk = spks[i] ##spks[0]
-    command = f'python svc_inference.py --config configs/base.yaml --mode baseline --spk {spk} --wave {filename}'
+    spk = spks[0] ##spks[0]
+
+    # command = f'python svc_inference.py --config configs/base.yaml --mode beaut --spk {spk} --wave {filename} --note acl'
+    # commands.extend([command])
+
+    command = f'python svc_inference.py --config configs/base.yaml --mode beaut_gauss --spk {spk} --wave {filename} --note acl'
     commands.extend([command])
-    # break
+
+    # command = f'python svc_inference.py --config configs/base.yaml --mode no_pca --spk {spk} --wave {filename} --note acl'
+    # commands.extend([command])
+
+    # command = f'python svc_inference.py --config configs/base.yaml --mode beaut_gauss --spk {spk} --wave {filename} --extent 25 --note acl'
+    # commands.extend([command])
+
+    # command = f'python svc_inference.py --config configs/base.yaml --mode beaut_gauss --spk {spk} --wave {filename} --extent 100 --note acl'
+    # commands.extend([command])
+    break
     # commands.extend([command1, command2])
 
 for command in commands:
